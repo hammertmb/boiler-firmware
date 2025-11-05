@@ -442,13 +442,12 @@ void webInit(){
  }
 
  void webTick(){
-   server.handleClient();
-   static int lastRelayState = -1;
-   int wanted = (g_speed_mode > 0) ? HIGH : LOW;
-   if (lastRelayState != wanted){
-     digitalWrite(PIN_RELAY_RUN, wanted);
-     lastRelayState = wanted;
-     if (wanted == HIGH) Serial.println("[HW] webTick: enforced RUN = ON");
-     else Serial.println("[HW] webTick: enforced RUN = OFF");
-   }
+  server.handleClient();
+  static int lastOn = -1;
+  int wantedOn = (g_speed_mode > 0) ? 1 : 0;
+  if (lastOn != wantedOn){
+    setRelay(PIN_RELAY_RUN, wantedOn);
+    lastOn = wantedOn;
+    Serial.println(String("[HW] webTick: enforced RUN = ") + (wantedOn? "ON":"OFF"));
+  }
 }
