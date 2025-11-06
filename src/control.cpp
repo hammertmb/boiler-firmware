@@ -7,12 +7,95 @@
 #include "sensors.h"
 #include "logging.h"
 #include "profiles.h"   // g_common, g_boilerMode, MODE_*
+// ===== V10.1 build 2025-11-05 — boiler-firmware / fix/run-relay-debug =====
+// Реализация удержания ступени ПЧ (ручной тест)
+static int8_t   s_forcedPcStep  = -1;
+static uint32_t s_forcedPcUntil = 0;
+
+void controlForcePcStep(int8_t step, uint32_t hold_ms){
+  if (step >= 0 && step <= 7) {
+    s_forcedPcStep  = step;
+    s_forcedPcUntil = millis() + hold_ms;
+    applySpeed((uint8_t)step);   // включаем ступень немедленно
+  } else {
+    s_forcedPcStep  = -1;
+    s_forcedPcUntil = 0;
+  }
+}
+
+void controlClearPcStep(){
+  s_forcedPcStep  = -1;
+  s_forcedPcUntil = 0;
+}
+
+bool controlIsPcStepForced(){
+  if (s_forcedPcStep < 0) return false;
+  if ((int32_t)(millis() - s_forcedPcUntil) >= 0) { // истёк таймер
+    s_forcedPcStep = -1;
+    return false;
+  }
+  return true;
+}
+
 
 // ================= ШНЕК: внутренние переменные =================
 static uint16_t aug_Ton   = 0;  // мс
 static uint16_t aug_Toff  = 0;  // мс
 static uint32_t aug_tMark = 0;
 static bool     aug_isOn  = false;
+
+float calcAugerFeedKgPerHour(float q100_kgph,
+                             float k_material,
+                             float ton_s,
+                             float toff_s,
+                             float step_frac)
+{
+  if (q100_kgph <= 0.0f)   return 0.0f;
+  if (k_material <= 0.0f)  return 0.0f;
+  if (step_frac <= 0.0f)   return 0.0f;
+  if (ton_s <= 0.0f)       return 0.0f;
+
+  const float period_s = ton_s + toff_s;
+  if (period_s <= 0.0f)    return 0.0f;
+
+  const float duty = ton_s / period_s;
+
+  return q100_kgph * duty * step_frac * k_material;
+}
+
+static float currentAugerStepFraction()
+{
+  if (g_speed_mode == 0) {
+    return 0.0f;
+  }
+  uint8_t idx = g_speed_mode ? (uint8_t)(g_speed_mode - 1) : 0;
+  const uint8_t maxIdx = (uint8_t)(sizeof(g_common.auger_steps10) / sizeof(g_common.auger_steps10[0]));
+  if (maxIdx == 0) {
+    return 0.0f;
+  }
+  if (idx >= maxIdx) {
+    idx = maxIdx - 1;
+  }
+  float value = g_common.auger_steps10[idx];
+  if (value <= 0.0f) {
+    return 0.0f;
+  }
+  float frac = value / 100.0f;
+  if (frac < 0.0f) frac = 0.0f;
+  if (frac > 1.0f) frac = 1.0f;
+  return frac;
+}
+
+float getCurrentFuelFeedKgPerHour()
+{
+  const float ton_s  = aug_Ton  / 1000.0f;
+  const float toff_s = aug_Toff / 1000.0f;
+  return calcAugerFeedKgPerHour(g_common.q100_kgph,
+                                g_common.k_material,
+                                ton_s,
+                                toff_s,
+                                currentAugerStepFraction());
+}
 
 // ================= Клампы минимальных длительностей =================
 static inline float clampTon(float s)  { const float mn = g_common.aug_min_ton_ms  / 1000.0f; return (s < mn) ? mn : s; }
@@ -84,6 +167,12 @@ void controlInit()
 // ================= Основной цикл управления =================
 void controlTick()
 {
+  // === приоритет удержания вручную выбранной ступени ПЧ ===
+  if (controlIsPcStepForced()) {
+    // удерживаем выбранную ступень; основной цикл не перетирает выходы
+    return;
+  }
+
   // Защита по максимальной температуре подачи
   {
     float ts = getTsupply();

@@ -81,11 +81,21 @@ void profilesInit(){
 }
 
 #include <Preferences.h>
-CommonSettings g_common = { 800, 1500, 85.0f, {12.5,25,37.5,50,60,70,80,100,100,100}, {12.5,25,37.5,50,60,70,80,100,100,100} };
+CommonSettings g_common = {
+  800,
+  1500,
+  85.0f,
+  {12.5,25,37.5,50,60,70,80,100,100,100},
+  {12.5,25,37.5,50,60,70,80,100,100,100},
+  10.0f,
+  1.0f
+};
 static void commonSave(Preferences& pr){
   pr.putUShort("amin_on",   g_common.aug_min_ton_ms);
   pr.putUShort("amin_off",  g_common.aug_min_toff_ms);
   pr.putFloat ("tmax",      g_common.T_supply_max);
+  pr.putFloat ("q100",      g_common.q100_kgph);
+  pr.putFloat ("kmat",      g_common.k_material);
   pr.putBytes ("fan10",     g_common.fan_steps, sizeof(g_common.fan_steps));
   pr.putBytes ("aug10",     g_common.auger_steps10, sizeof(g_common.auger_steps10));
 }
@@ -93,6 +103,8 @@ static bool commonLoad(Preferences& pr){
   g_common.aug_min_ton_ms  = pr.getUShort("amin_on",  g_common.aug_min_ton_ms);
   g_common.aug_min_toff_ms = pr.getUShort("amin_off", g_common.aug_min_toff_ms);
   g_common.T_supply_max    = pr.getFloat ("tmax",     g_common.T_supply_max);
+  g_common.q100_kgph       = pr.getFloat ("q100",     g_common.q100_kgph);
+  g_common.k_material      = pr.getFloat ("kmat",     g_common.k_material);
   pr.getBytes("fan10", g_common.fan_steps, sizeof(g_common.fan_steps));
   pr.getBytes("aug10", g_common.auger_steps10, sizeof(g_common.auger_steps10));
   return true;

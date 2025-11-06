@@ -4,3 +4,19 @@
 
 void controlInit();
 void controlTick();
+
+float calcAugerFeedKgPerHour(float q100_kgph,
+                             float k_material,
+                             float ton_s,
+                             float toff_s,
+                             float step_frac);
+float getCurrentFuelFeedKgPerHour();
+
+// ===== V10.1 build 2025-11-05 — boiler-firmware / fix/run-relay-debug =====
+// Файл: control.h — добавлены прототипы удержания ступени ПЧ (ручной тест)
+#ifndef CONTROL_PC_HOLD_API_GUARD
+#define CONTROL_PC_HOLD_API_GUARD
+void controlForcePcStep(int8_t step, uint32_t hold_ms = 30000); // step: 0..7; -1 = clear
+void controlClearPcStep();
+bool controlIsPcStepForced();
+#endif

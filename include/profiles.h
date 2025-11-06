@@ -29,6 +29,8 @@ struct CommonSettings {
   float    T_supply_max;
   float    fan_steps[10];
   float    auger_steps10[10];
+  float    q100_kgph;
+  float    k_material;
 };
 extern CommonSettings g_common;
 extern ModeProfile g_cfg;

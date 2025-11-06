@@ -1,4 +1,4 @@
-// FW-VERSION: V10.1-UI-ProfilesRework-4 — web.cpp (UI only; файл из последнего архива)
+﻿// FW-VERSION: V10.1-UI-ProfilesRework-4 — web.cpp (UI only; файл из последнего архива)
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
@@ -8,6 +8,7 @@
 #include "profiles.h"
 #include "sensors.h"
 #include "logging.h"
+#include "control.h"
 #include "pins.h"
 #include <Preferences.h>   // <-- добавлено
 
@@ -23,8 +24,10 @@ static inline String jn(const char* k, const String& v, bool last=false){ String
 // ========== /api/status ==========
 static String jsonStatus(){
   String j="{";
+  const float feedKgph = getCurrentFuelFeedKgPerHour();
   j+=jn("fw", q(FW_VER));
   j+=jn("speed", String(g_speed_mode));
+  j+=jn("feed_kgph", String(feedKgph, 2));
   // relays
   j+="\"relays\":{";
     j+=jn("run",  String(relayIsOn(PIN_RELAY_RUN) ? "true":"false"));
@@ -103,13 +106,9 @@ static void handleCmd(){ // POST {"speed":0..8}
 
   // Принудительно синхронизируем реле RUN с текущей скоростью
   // Если логика реле у вас инвертирована — поменяйте HIGH/LOW
-  if (g_speed_mode > 0) {
-    digitalWrite(PIN_RELAY_RUN, HIGH);
-    Serial.println("[HW] RUN relay -> ON");
-  } else {
-    digitalWrite(PIN_RELAY_RUN, LOW);
-    Serial.println("[HW] RUN relay -> OFF");
-  }
+  // Синхронизируем RUN через setRelay (учитывает инверсию)
+  setRelay(PIN_RELAY_RUN, (g_speed_mode > 0));
+  Serial.println(String("[HW] RUN relay -> ") + (g_speed_mode>0 ? "ON":"OFF"));
 
   // Если есть реальная функция управления VFD - вызывать здесь:
   // vfdSetSpeed(sp);
@@ -170,6 +169,8 @@ static String jsonCommonDefault(){
   j += jn("tflue_high", String(220,1));
   j += jn("kp", String(1.2,3));
   j += jn("ki", String(0.01,4));
+  j += jn("q100", String(10.0f,3));
+  j += jn("kmat", String(1.0f,3));
   // fan, fan2, aug10 arrays (по 10 значений 10..100)
   j += "\"fan\":["; for(int i=0;i<10;i++){ if(i) j += ','; j += String((i+1)*10); } j += "],";
   j += "\"fan2\":["; for(int i=0;i<10;i++){ if(i) j += ','; j += String((i+1)*10); } j += "],";
@@ -312,7 +313,7 @@ static String INDEX_HTML(){
   h += F("<div class='tab' data-c='air2'>Вторичный воздух</div>");
   h += F("<div class='tab' data-c='auger'>Шнек</div>");
   h += F("<div class='tab' data-c='temp'>Температура</div>");
-  h += F("<div class='tab' data-c='coef'>Коэффициенты</div>");
+  h += F("<div class='tab' data-c='coef'>Коэффициенты</div><div class='tab' data-c='alarm'>Аварийный режим</div>");
   h += F("</div>");
 
   // Первичный воздух — вентилятор 1 (10 ступеней, %)
@@ -329,11 +330,13 @@ static String INDEX_HTML(){
 
   // Шнек — общие
   h += F("<div id='cAuger' class='hidden'>");
-  h += F("<div class='s'>Шнек — 10 ступеней, %</div>");
+  h += F("<div class='s'>Шнек - 10 ступеней, %</div>");
   h += F("<div id='aug10' style='display:flex;flex-wrap:wrap;gap:6px; margin-bottom:8px'></div>");
   h += F("<div class='grid g2'>");
   h += F("<div class='s'>Мин. время работы шнека (мс)</div><input id='g_minTon' type='number' step='10'>");
   h += F("<div class='s'>Мин. пауза шнека (мс)</div><input id='g_minToff' type='number' step='10'>");
+  h += F("<div class='s'>Q100 (кг/ч @100%)</div><input id='g_q100' type='number' step='0.001'>");
+  h += F("<div class='s'>K материала</div><input id='g_kmat' type='number' step='0.001'>");
   h += F("</div>");
   h += F("</div>");
 
@@ -349,7 +352,61 @@ static String INDEX_HTML(){
   h += F("<div>P <input id='g_Kp' type='number' step='0.001'> I <input id='g_Ki' type='number' step='0.0001'></div>");
   h += F("</div>");
 
-  // Кнопки общих
+  
+  // Аварийный режим — UI
+  h += F("<div id='cAlarm' class='hidden'>");
+
+  // Температуры
+  h += F("<div class='s' style='margin-top:6px'>Температуры</div>");
+  h += F("<div class='grid g2'>"
+         "<div class='s'>Макс. T подачи (&deg;C)</div><input id='al_TfeedMax' type='number' step='0.1'>"
+         "<div class='s'>Макс. T обратки (&deg;C)</div><input id='al_TreturnMax' type='number' step='0.1'>"
+         "<div class='s'>Дымовые — верхний аварийный порог (&deg;C)</div><input id='al_TflueMax' type='number' step='0.1'>"
+         "<div class='s'>«Нет пламени» по дымовым — порог (&deg;C)</div><input id='al_noFlameThresh' type='number' step='0.1'>"
+         "<div class='s'>«Нет пламени» — выдержка, с (Розжиг)</div><input id='al_noFlameHoldIgn' type='number' step='1'>"
+         "<div class='s'>«Нет пламени» — выдержка, с (Разогрев)</div><input id='al_noFlameHoldHeat' type='number' step='1'>"
+         "<div class='s'>«Нет пламени» — выдержка, с (Поддержание)</div><input id='al_noFlameHoldKeep' type='number' step='1'>"
+         "</div>");
+
+  // Динамика
+  h += F("<div class='s' style='margin-top:10px'>Динамика</div>");
+  h += F("<div class='grid g2'>"
+         "<div class='s'>Макс. скорость роста T подачи (&deg;C/мин)</div><input id='al_TfeedRateMax' type='number' step='0.1'>"
+         "<div class='s'>&#916;T = подача − обратка — максимум (&deg;C)</div><input id='al_deltaTmax' type='number' step='0.1'>"
+         "<div class='s'>&#916;T — выдержка превышения, с</div><input id='al_deltaTHold' type='number' step='1'>"
+         "</div>");
+
+  // Приводы / ПЧ
+  h += F("<div class='s' style='margin-top:10px'>Приводы / ПЧ</div>");
+  h += F("<div class='grid g2'>"
+         "<label><input id='al_sn_fault' type='checkbox'> Шнек — FAULT ⇒ авария</label><div></div>"
+         "<div class='s'>Шнек — RUN не появился за, с</div><input id='al_sn_run_to' type='number' step='1'>"
+         "<label><input id='al_v1_fault' type='checkbox'> Вентилятор 1 — FAULT ⇒ авария</label><div></div>"
+         "<div class='s'>Вентилятор 1 — RUN не появился за, с</div><input id='al_v1_run_to' type='number' step='1'>"
+         "<label><input id='al_v2_fault' type='checkbox'> Вентилятор 2 — FAULT ⇒ авария</label><div></div>"
+         "<div class='s'>Вентилятор 2 — RUN не появился за, с</div><input id='al_v2_run_to' type='number' step='1'>"
+         "</div>");
+
+  // Таймауты стадий
+  h += F("<div class='s' style='margin-top:10px'>Таймауты стадий</div>");
+  h += F("<div class='grid g2'>"
+         "<div class='s'>Розжиг — таймаут, с</div><input id='al_ign_timeout' type='number' step='1'>"
+         "<div class='s'>Разогрев — таймаут, с</div><input id='al_warmup_timeout' type='number' step='1'>"
+         "</div>");
+
+  // Датчики (санити-чек)
+  h += F("<div class='s' style='margin-top:10px'>Датчики</div>");
+  h += F("<div class='grid g2'>"
+         "<div class='s'>Тайм-аут получения температуры, с</div><input id='al_temp_timeout' type='number' step='1' value='20'>"
+         "<div class='s'>Допустимый диапазон температуры: мин (&deg;C)</div><input id='al_temp_min' type='number' step='0.1' value='0'>"
+         "<div class='s'>Допустимый диапазон температуры: макс (&deg;C)</div><input id='al_temp_max' type='number' step='0.1' value='100'>"
+         "<label><input id='al_sens_feed' type='checkbox' checked> Контролировать — Подача</label><div></div>"
+         "<label><input id='al_sens_return' type='checkbox' checked> Контролировать — Обратка</label><div></div>"
+         "<label><input id='al_sens_flue' type='checkbox' checked> Контролировать — Дымовые</label><div></div>"
+         "</div>");
+
+  h += F("</div>");
+// Кнопки общих
   h += F("<div style='margin-top:10px'><button id='gLoad'>Загрузить</button> <button id='gSave'>Сохранить</button></div>");
 
   h += F("</div>"); // viewCommon
@@ -362,6 +419,7 @@ static String INDEX_HTML(){
   // ====== SCRIPT ======
   h += F("<script>const $=s=>document.querySelector(s), $$=s=>Array.from(document.querySelectorAll(s));");
   h += F("function pill(el,v){el.textContent=v?'ВКЛ':'ВЫКЛ'; el.style.background=v?'#0d2a1f':'#2a2333';}");
+  h += F("(function(){const grid=document.querySelector('.grid.g2');if(!grid)return;const cards=grid.querySelectorAll('.card');if(cards.length<2)return;if(document.getElementById('feedKgph'))return;const row=document.createElement('div');row.innerHTML='Подача топлива: <span id=\"feedKgph\">-</span> <span class=\"s\">кг/ч</span>';cards[1].appendChild(row);}());");
   // VFD indicator helper
   h += F("function setVFD(id,state){const el=document.getElementById(id); if(!el) return; el.className='vfd'; if(state==='missing') el.classList.add('vfd-miss'); else if(state==='on') el.classList.add('vfd-on'); else el.classList.add('vfd-off'); }");
   // ----- Управление кнопками скоростей ПЧ -----
@@ -374,6 +432,7 @@ static String INDEX_HTML(){
    h += F("$('#t3').textContent=(j.temp&&j.temp.stack!=null)?Number(j.temp.stack).toFixed(1):'—';");
    h += F("pill($('#rRun'),j.relays&&j.relays.run==='true'); pill($('#rMs1'),j.relays&&j.relays.ms1==='true'); pill($('#rMs2'),j.relays&&j.relays.ms2==='true'); pill($('#rMs3'),j.relays&&j.relays.ms3==='true');");
    h += F("const sp=Number(j.speed||0); $('#rMode').textContent=isFinite(sp)?sp:'—';");
+  h += F("const feedVal=(j.feed_kgph!==undefined&&j.feed_kgph!==null)?Number(j.feed_kgph):NaN; const feedEl=id('feedKgph'); if(feedEl){ feedEl.textContent=isFinite(feedVal)?feedVal.toFixed(1):'-'; }");
    h += F("const vv=j.vfd||{}; setVFD('vfd1', (vv.v1_conn==='true') ? (vv.v1_on==='true'?'on':'off') : 'missing'); setVFD('vfd2', (vv.v2_conn==='true') ? (vv.v2_on==='true'?'on':'off') : 'missing'); setVFD('vfd3', (vv.v3_conn==='true') ? (vv.v3_on==='true'?'on':'off') : 'missing');");
    h += F("$('#modeName').textContent=(j.boiler&&j.boiler.modeName)?j.boiler.modeName:'—'; $('#setp').value=(j.boiler&&j.boiler.setpoint)?j.boiler.setpoint:60;");
    h += F("}catch(e){}}");
@@ -389,7 +448,7 @@ static String INDEX_HTML(){
 
   // ——— Общие: подвкладки ———
   h += F("let cMode='air1'; function id(x){return document.getElementById(x);}");
-  h += F("function commonShow(k){ cMode=k; const map={air1:'cAir1',air2:'cAir2',auger:'cAuger',temp:'cTemp',coef:'cCoef'}; for(const key in map){ id(map[key]).classList.toggle('hidden', key!==k);} $$('#commonTabs .tab').forEach(t=>t.classList.toggle('active', t.dataset.c===k)); }");
+  h += F("function commonShow(k){ cMode=k; const map={air1:'cAir1',air2:'cAir2',auger:'cAuger',temp:'cTemp',coef:'cCoef',alarm:'cAlarm'}; for(const key in map){ id(map[key]).classList.toggle('hidden', key!==k);} $$('#commonTabs .tab').forEach(t=>t.classList.toggle('active', t.dataset.c===k)); }");
   h += F("$$('#commonTabs .tab').forEach(t=>t.addEventListener('click',()=>commonShow(t.dataset.c)));");
 
   // ——— CRUD профилей ———
@@ -407,9 +466,11 @@ static String INDEX_HTML(){
   h += F("async function gLoad(){ try{ const r=await fetch('/api/common'); if(!r.ok) throw new Error('HTTP '+r.status); const j=await r.json();");
   h += F("id('g_minTon').value=j.amin_on||0; id('g_minToff').value=j.amin_off||0; id('g_Tmax').value=j.tmax||0; id('g_TflueHigh').value=j.tflue_high||0;");
   h += F("id('g_Kp').value=j.kp||0; id('g_Ki').value=j.ki||0;");
+  h += F("id('g_q100').value=(j.q100!==undefined&&j.q100!==null)?j.q100:10;");
+  h += F("id('g_kmat').value=(j.kmat!==undefined&&j.kmat!==null)?j.kmat:1;");
   h += F("const fan1 = j.fan || j.fan1 || []; const fan2 = j.fan2 || []; const aug  = j.aug10 || []; for(let i=0;i<10;i++){ var e1=id('gf1'+i); if(e1) e1.value = fan1[i]||0; var e2=id('gf2'+i); if(e2) e2.value = fan2[i]||0; var ea=id('ga'+i); if(ea) ea.value = aug[i]||0; }");
   h += F("}catch(e){ alert('Ошибка загрузки общих: '+e.message); } }");
-  h += F("async function gSave(){ try{ const body={ amin_on:Number(id('g_minTon').value||0), amin_off:Number(id('g_minToff').value||0), tmax:Number(id('g_Tmax').value||0), tflue_high:Number(id('g_TflueHigh').value||0), kp:Number(id('g_Kp').value||0), ki:Number(id('g_Ki').value||0), fan:Array.from({length:10},(_,i)=>Number((id('gf1'+i)&&id('gf1'+i).value)||0)), fan2:Array.from({length:10},(_,i)=>Number((id('gf2'+i)&&id('gf2'+i).value)||0)), aug10:Array.from({length:10},(_,i)=>Number((id('ga'+i)&&id('ga'+i).value)||0)) };");
+  h += F("async function gSave(){ try{ const body={ amin_on:Number(id('g_minTon').value||0), amin_off:Number(id('g_minToff').value||0), tmax:Number(id('g_Tmax').value||0), tflue_high:Number(id('g_TflueHigh').value||0), kp:Number(id('g_Kp').value||0), ki:Number(id('g_Ki').value||0), q100:Number(id('g_q100').value||10), kmat:Number(id('g_kmat').value||1), fan:Array.from({length:10},(_,i)=>Number((id('gf1'+i)&&id('gf1'+i).value)||0)), fan2:Array.from({length:10},(_,i)=>Number((id('gf2'+i)&&id('gf2'+i).value)||0)), aug10:Array.from({length:10},(_,i)=>Number((id('ga'+i)&&id('ga'+i).value)||0)) };");
   h += F("await fetch('/api/common',{method:'POST',headers:{'Content-Type':'application/json; charset=utf-8'},body:JSON.stringify(body)}); alert('Общие сохранены'); }catch(e){ alert('Ошибка сохранения: '+e.message);} }");
   h += F("id('gLoad').addEventListener('click', gLoad); id('gSave').addEventListener('click', gSave);");
 
@@ -425,7 +486,8 @@ static void handleRoot(){ server.sendHeader("Cache-Control","no-store"); server.
 void webInit(){
   // Убедиться, что реле RUN настроено как выход и в состоянии, соответствующем g_speed_mode
   pinMode(PIN_RELAY_RUN, OUTPUT);
-  if (g_speed_mode > 0) digitalWrite(PIN_RELAY_RUN, HIGH); else digitalWrite(PIN_RELAY_RUN, LOW);
+  // Используем setRelay чтобы учитывать RELAY_ACTIVE_LOW
+  setRelay(PIN_RELAY_RUN, (g_speed_mode > 0));
 
    server.on("/", HTTP_GET, handleRoot);
    server.on("/api/status", HTTP_GET, handleStatus);
