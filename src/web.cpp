@@ -522,6 +522,7 @@ void webInit(){
   server.handleClient();
   static int lastOn = -1;
   int wantedOn = (g_speed_mode > 0) ? 1 : 0;
+  Serial.println(ESP.getFreeHeap());
   if (lastOn != wantedOn){
     setRelay(PIN_RELAY_RUN, wantedOn);
     lastOn = wantedOn;
