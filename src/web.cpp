@@ -132,7 +132,11 @@ static void handleBoiler(){ // POST {"mode":0..5, "setpoint":<C>}
 static String jsonProfileSlim(const ModeProfile& p, uint8_t /*mode*/){
   String j="{";
   j+=jn("Tflue_low", String(p.Tflue_low,1));
-  j+=jn("Tflue_high", String(p.Tflue_high,1), true);
+  j+=jn("Tflue_high", String(p.Tflue_high,1));
+  j+=jn("air1", String(p.air_primary_pct_ui,1));
+  j+=jn("air2", String(p.air_secondary_pct_ui,1));
+  j+=jn("ton", String(p.ton_ui_sec,2));
+  j+=jn("toff", String(p.toff_ui_sec,2), true);
   j+="}";
   return j;
 }
@@ -153,6 +157,10 @@ static void handleProfilePost(){ // POST (сохраняем Tflue_low/high дл
   ModeProfile p = profileOf(m);
   parseF(b,"Tflue_low",p.Tflue_low);
   parseF(b,"Tflue_high",p.Tflue_high);
+  parseF(b,"air1",p.air_primary_pct_ui);
+  parseF(b,"air2",p.air_secondary_pct_ui);
+  parseF(b,"ton",p.ton_ui_sec);
+  parseF(b,"toff",p.toff_ui_sec);
 
   updateProfile(m,p);
   profilesSaveToNVS();
@@ -448,14 +456,20 @@ static String INDEX_HTML(){
 
   // ——— Общие: подвкладки ———
   h += F("let cMode='air1'; function id(x){return document.getElementById(x);}");
+  h += F("function calcFuelPreview(){ const tonEl=id('m_ton'), toffEl=id('m_toff'), qEl=id('g_q100'), kEl=id('g_kmat'), out=id('m_fuel'); if(!out) return; const ton=parseFloat(tonEl&&tonEl.value?tonEl.value:''); const toff=parseFloat(toffEl&&toffEl.value?toffEl.value:''); const q=parseFloat(qEl&&qEl.value?qEl.value:''); const k=parseFloat(kEl&&kEl.value?kEl.value:''); if(!isFinite(ton)||ton<=0||!isFinite(q)||q<=0||!isFinite(k)||k<=0){ out.value=''; return; } const pause=(isFinite(toff)&&toff>0)?toff:0; const period=ton+pause; if(period<=0){ out.value=''; return; } const duty=ton/period; const feed=q*duty*k; out.value=isFinite(feed)?feed.toFixed(2):''; }");
+  h += F("function bindFuelInputs(){['m_ton','m_toff','g_q100','g_kmat'].forEach(name=>{ const el=id(name); if(!el) return; ['input','change'].forEach(evt=>el.addEventListener(evt,calcFuelPreview)); el.addEventListener('keyup',ev=>{ if(ev.key==='Enter') calcFuelPreview(); });}); }");
+  h += F("bindFuelInputs();");
   h += F("function commonShow(k){ cMode=k; const map={air1:'cAir1',air2:'cAir2',auger:'cAuger',temp:'cTemp',coef:'cCoef',alarm:'cAlarm'}; for(const key in map){ id(map[key]).classList.toggle('hidden', key!==k);} $$('#commonTabs .tab').forEach(t=>t.classList.toggle('active', t.dataset.c===k)); }");
   h += F("$$('#commonTabs .tab').forEach(t=>t.addEventListener('click',()=>commonShow(t.dataset.c)));");
 
   // ——— CRUD профилей ———
   h += F("async function cfgLoad(){ const r=await fetch('/api/profile?m='+cfgMode); const c=await r.json();");
   h += F("id('m_Tfl_low').value=(c.Tflue_low!=null?c.Tflue_low:150); id('m_Tfl_high').value=(c.Tflue_high!=null?c.Tflue_high:200);");
+  h += F("id('m_air1').value=(c.air1!=null?c.air1:''); id('m_air2').value=(c.air2!=null?c.air2:'');");
+  h += F("id('m_ton').value=(c.ton!=null?c.ton:''); id('m_toff').value=(c.toff!=null?c.toff:'');");
+  h += F("calcFuelPreview();");
   h += F("}");
-  h += F("async function cfgSave(){ const body={ Tflue_low:Number(id('m_Tfl_low').value||0), Tflue_high:Number(id('m_Tfl_high').value||0) }; await fetch('/api/profile?m='+cfgMode,{method:'POST',headers:{'Content-Type':'application/json; charset=utf-8'},body:JSON.stringify(body)}); alert('Сохранено'); }");
+  h += F("async function cfgSave(){ const body={ Tflue_low:Number(id('m_Tfl_low').value||0), Tflue_high:Number(id('m_Tfl_high').value||0), air1:Number(id('m_air1').value||0), air2:Number(id('m_air2').value||0), ton:Number(id('m_ton').value||0), toff:Number(id('m_toff').value||0) }; await fetch('/api/profile?m='+cfgMode,{method:'POST',headers:{'Content-Type':'application/json; charset=utf-8'},body:JSON.stringify(body)}); alert('Сохранено'); }");
   h += F("async function cfgApply(){ await fetch('/api/boiler',{method:'POST',headers:{'Content-Type':'application/json; charset=utf-8'},body:JSON.stringify({mode:cfgMode})}); await fetchStatus(); alert('Применено'); }");
   h += F("async function cfgFactory(){ await fetch('/api/profile?m='+cfgMode+'&reset=1'); await cfgLoad(); alert('Сброшено к заводским'); }");
   h += F("$('#cfgLoad').addEventListener('click',cfgLoad); $('#cfgSave').addEventListener('click',cfgSave); $('#cfgApply').addEventListener('click',cfgApply); $('#cfgFactory').addEventListener('click',cfgFactory);");
@@ -469,6 +483,7 @@ static String INDEX_HTML(){
   h += F("id('g_q100').value=(j.q100!==undefined&&j.q100!==null)?j.q100:10;");
   h += F("id('g_kmat').value=(j.kmat!==undefined&&j.kmat!==null)?j.kmat:1;");
   h += F("const fan1 = j.fan || j.fan1 || []; const fan2 = j.fan2 || []; const aug  = j.aug10 || []; for(let i=0;i<10;i++){ var e1=id('gf1'+i); if(e1) e1.value = fan1[i]||0; var e2=id('gf2'+i); if(e2) e2.value = fan2[i]||0; var ea=id('ga'+i); if(ea) ea.value = aug[i]||0; }");
+  h += F("calcFuelPreview();");
   h += F("}catch(e){ alert('Ошибка загрузки общих: '+e.message); } }");
   h += F("async function gSave(){ try{ const body={ amin_on:Number(id('g_minTon').value||0), amin_off:Number(id('g_minToff').value||0), tmax:Number(id('g_Tmax').value||0), tflue_high:Number(id('g_TflueHigh').value||0), kp:Number(id('g_Kp').value||0), ki:Number(id('g_Ki').value||0), q100:Number(id('g_q100').value||10), kmat:Number(id('g_kmat').value||1), fan:Array.from({length:10},(_,i)=>Number((id('gf1'+i)&&id('gf1'+i).value)||0)), fan2:Array.from({length:10},(_,i)=>Number((id('gf2'+i)&&id('gf2'+i).value)||0)), aug10:Array.from({length:10},(_,i)=>Number((id('ga'+i)&&id('ga'+i).value)||0)) };");
   h += F("await fetch('/api/common',{method:'POST',headers:{'Content-Type':'application/json; charset=utf-8'},body:JSON.stringify(body)}); alert('Общие сохранены'); }catch(e){ alert('Ошибка сохранения: '+e.message);} }");

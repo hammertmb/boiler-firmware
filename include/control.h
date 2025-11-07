@@ -8,8 +8,7 @@ void controlTick();
 float calcAugerFeedKgPerHour(float q100_kgph,
                              float k_material,
                              float ton_s,
-                             float toff_s,
-                             float step_frac);
+                             float toff_s);
 float getCurrentFuelFeedKgPerHour();
 
 // ===== V10.1 build 2025-11-05 — boiler-firmware / fix/run-relay-debug =====

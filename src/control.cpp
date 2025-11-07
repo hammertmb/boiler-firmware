@@ -47,12 +47,10 @@ static bool     aug_isOn  = false;
 float calcAugerFeedKgPerHour(float q100_kgph,
                              float k_material,
                              float ton_s,
-                             float toff_s,
-                             float step_frac)
+                             float toff_s)
 {
   if (q100_kgph <= 0.0f)   return 0.0f;
   if (k_material <= 0.0f)  return 0.0f;
-  if (step_frac <= 0.0f)   return 0.0f;
   if (ton_s <= 0.0f)       return 0.0f;
 
   const float period_s = ton_s + toff_s;
@@ -60,30 +58,7 @@ float calcAugerFeedKgPerHour(float q100_kgph,
 
   const float duty = ton_s / period_s;
 
-  return q100_kgph * duty * step_frac * k_material;
-}
-
-static float currentAugerStepFraction()
-{
-  if (g_speed_mode == 0) {
-    return 0.0f;
-  }
-  uint8_t idx = g_speed_mode ? (uint8_t)(g_speed_mode - 1) : 0;
-  const uint8_t maxIdx = (uint8_t)(sizeof(g_common.auger_steps10) / sizeof(g_common.auger_steps10[0]));
-  if (maxIdx == 0) {
-    return 0.0f;
-  }
-  if (idx >= maxIdx) {
-    idx = maxIdx - 1;
-  }
-  float value = g_common.auger_steps10[idx];
-  if (value <= 0.0f) {
-    return 0.0f;
-  }
-  float frac = value / 100.0f;
-  if (frac < 0.0f) frac = 0.0f;
-  if (frac > 1.0f) frac = 1.0f;
-  return frac;
+  return q100_kgph * duty * k_material;
 }
 
 float getCurrentFuelFeedKgPerHour()
@@ -93,8 +68,7 @@ float getCurrentFuelFeedKgPerHour()
   return calcAugerFeedKgPerHour(g_common.q100_kgph,
                                 g_common.k_material,
                                 ton_s,
-                                toff_s,
-                                currentAugerStepFraction());
+                                toff_s);
 }
 
 // ================= Клампы минимальных длительностей =================
