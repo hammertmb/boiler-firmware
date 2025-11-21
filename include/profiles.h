@@ -21,6 +21,12 @@ struct ModeProfile {
   float V2_min, V2_base, V2_max, V2_ramp_sec;
 
   uint32_t ignition_time_ms, cool_time_ms;
+
+  // UI-configurable helpers (per-mode manual fuel/air presets)
+  float air_primary_pct_ui;
+  float air_secondary_pct_ui;
+  float ton_ui_sec;
+  float toff_ui_sec;
 };
 
 struct CommonSettings {
@@ -29,6 +35,8 @@ struct CommonSettings {
   float    T_supply_max;
   float    fan_steps[10];
   float    auger_steps10[10];
+  float    q100_kgph;
+  float    k_material;
 };
 extern CommonSettings g_common;
 extern ModeProfile g_cfg;

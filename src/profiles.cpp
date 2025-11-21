@@ -7,12 +7,12 @@ ModeProfile g_cfg;
 uint8_t     g_boilerMode = MODE_OFF;
 
 static ModeProfile s_defaults[6] = {
-  /* OFF */  {60,2,0.06,0.003,150,200,{0.30,0.45,0.60,0.80},{5,6,7,8},4,40,30,0.8,2,1,25,60,2,20,30,65,2,300000,180000},
-  /* MAN */  {60,2,0.06,0.003,150,200,{0.30,0.45,0.60,0.80},{5,6,7,8},4,40,30,0.8,2,1,25,60,2,20,30,65,2,300000,180000},
-  /* IGN */  {60,2,0.06,0.003,150,200,{0.30,0.45,0.60,0.80},{6,7,8,9},4,40,30,0.8,2,1,28,60,2,22,32,65,2,300000,180000},
-  /* HEAT */ {60,2,0.07,0.0035,150,200,{0.30,0.45,0.60,0.80},{6,7,8,9},4,40,28,0.85,2,1,25,60,2,20,30,65,2,300000,180000},
-  /* HOLD */ {60,2,0.06,0.003,150,200,{0.30,0.45,0.60,0.80},{5,6,7,8},4,40,30,0.8,2,1,25,55,2,20,30,60,2,300000,180000},
-  /* COOL */ {55,2,0.05,0.002,150,200,{0.30,0.45,0.60,0.80},{4,5,6,7},4,40,32,0.7,2,1,20,40,2,18,25,45,2,300000,180000}
+  /* OFF */  {60,2,0.06,0.003,150,200,{0.30,0.45,0.60,0.80},{5,6,7,8},4,40,30,0.8,2,1,25,60,2,20,30,65,2,300000,180000,30,30,5,25},
+  /* MAN */  {60,2,0.06,0.003,150,200,{0.30,0.45,0.60,0.80},{5,6,7,8},4,40,30,0.8,2,1,25,60,2,20,30,65,2,300000,180000,35,35,6,24},
+  /* IGN */  {60,2,0.06,0.003,150,200,{0.30,0.45,0.60,0.80},{6,7,8,9},4,40,30,0.8,2,1,28,60,2,22,32,65,2,300000,180000,40,45,7,23},
+  /* HEAT */ {60,2,0.07,0.0035,150,200,{0.30,0.45,0.60,0.80},{6,7,8,9},4,40,28,0.85,2,1,25,60,2,20,30,65,2,300000,180000,45,50,8,20},
+  /* HOLD */ {60,2,0.06,0.003,150,200,{0.30,0.45,0.60,0.80},{5,6,7,8},4,40,30,0.8,2,1,25,55,2,20,30,60,2,300000,180000,25,30,5,30},
+  /* COOL */ {55,2,0.05,0.002,150,200,{0.30,0.45,0.60,0.80},{4,5,6,7},4,40,32,0.7,2,1,20,40,2,18,25,45,2,300000,180000,20,20,4,28}
 };
 static ModeProfile s_profiles[6];
 
@@ -81,11 +81,21 @@ void profilesInit(){
 }
 
 #include <Preferences.h>
-CommonSettings g_common = { 800, 1500, 85.0f, {12.5,25,37.5,50,60,70,80,100,100,100}, {12.5,25,37.5,50,60,70,80,100,100,100} };
+CommonSettings g_common = {
+  800,
+  1500,
+  85.0f,
+  {12.5,25,37.5,50,60,70,80,100,100,100},
+  {12.5,25,37.5,50,60,70,80,100,100,100},
+  10.0f,
+  1.0f
+};
 static void commonSave(Preferences& pr){
   pr.putUShort("amin_on",   g_common.aug_min_ton_ms);
   pr.putUShort("amin_off",  g_common.aug_min_toff_ms);
   pr.putFloat ("tmax",      g_common.T_supply_max);
+  pr.putFloat ("q100",      g_common.q100_kgph);
+  pr.putFloat ("kmat",      g_common.k_material);
   pr.putBytes ("fan10",     g_common.fan_steps, sizeof(g_common.fan_steps));
   pr.putBytes ("aug10",     g_common.auger_steps10, sizeof(g_common.auger_steps10));
 }
@@ -93,6 +103,8 @@ static bool commonLoad(Preferences& pr){
   g_common.aug_min_ton_ms  = pr.getUShort("amin_on",  g_common.aug_min_ton_ms);
   g_common.aug_min_toff_ms = pr.getUShort("amin_off", g_common.aug_min_toff_ms);
   g_common.T_supply_max    = pr.getFloat ("tmax",     g_common.T_supply_max);
+  g_common.q100_kgph       = pr.getFloat ("q100",     g_common.q100_kgph);
+  g_common.k_material      = pr.getFloat ("kmat",     g_common.k_material);
   pr.getBytes("fan10", g_common.fan_steps, sizeof(g_common.fan_steps));
   pr.getBytes("aug10", g_common.auger_steps10, sizeof(g_common.auger_steps10));
   return true;
